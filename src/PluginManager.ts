@@ -1,18 +1,17 @@
 import path from "path";
 import pino from "pino";
 import requireModule from "require-module";
+import { SourcePlugin } from "./plugins/SourcePlugin";
 
-interface IPlugin {
-  name: string;
+interface IPluginConfig {
   packageName: string;
   isRelative?: boolean;
-  instance?: any;
   options?: any;
 }
 
-class PluginManager {
+class PluginManager<T extends SourcePlugin> {
   private logger: pino.Logger;
-  private plugins: Map<String, IPlugin>;
+  private plugins: Map<String, T>;
   private path: string;
 
   constructor({ logger, path }: { logger: pino.Logger; path: string }) {
@@ -21,47 +20,60 @@ class PluginManager {
     this.path = path;
   }
 
-  registerPlugin(plugin: IPlugin): void {
-    if (!plugin.name || !plugin.packageName) {
-      throw new Error("Plugin name and packageName are required");
+  registerPlugin(pluginConfig: IPluginConfig): T {
+    if (!pluginConfig.packageName) {
+      throw new Error("Plugin packageName is required");
     }
 
-    if (this.pluginExists(plugin.name)) {
-      throw new Error(`Cannot add existing plugin ${plugin.name}`);
+    const packageContents = this.requirePlugin(pluginConfig);
+
+    packageContents.default.prototype.options = pluginConfig.options;
+
+    const instance = Object.create(packageContents.default.prototype) as T;
+
+    this.logger.debug(
+      `Registering plugin for source: ${instance.getSourceName()}`
+    );
+
+    if (this.plugins.has(instance.getSourceName())) {
+      throw new Error(
+        `There is already a plugin registered for source ${instance.getSourceName()}`
+      );
     }
 
-    try {
-      // Try to load the plugin
-      const packageContents = plugin.isRelative
-        ? requireModule(path.join(this.path, plugin.packageName))
-        : requireModule(plugin.packageName);
-      this.addPlugin(plugin, packageContents);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      this.logger.error(`Cannot load plugin ${plugin.name}: ${message}`);
-    }
+    this.plugins.set(instance.getSourceName(), instance);
+
+    return instance;
   }
 
-  loadPlugin<T>(name: string): T {
-    const plugin = this.plugins.get(name);
+  loadPlugin(sourceName: string): T {
+    this.logger.debug(`Loading plugin for source: ${sourceName}`);
+
+    const plugin = this.plugins.get(sourceName);
+
     if (!plugin) {
-      throw new Error(`Cannot find plugin ${name}`);
+      throw new Error(`No plugin registered for source ${sourceName}`);
     }
 
-    plugin.instance.default.prototype.options = plugin.options;
-    return Object.create(plugin.instance.default.prototype) as T;
+    return plugin;
   }
 
   listPlugins() {
-    return Object.freeze(this.plugins);
+    return Object.seal(this.plugins);
   }
 
-  private addPlugin(plugin: IPlugin, packageContents: any): void {
-    this.plugins.set(plugin.name, { ...plugin, instance: packageContents });
-  }
-
-  private pluginExists(name: string): boolean {
-    return this.plugins.has(name);
+  private requirePlugin(pluginConfig: IPluginConfig): any {
+    try {
+      // Try to load the module for the plugin
+      return pluginConfig.isRelative
+        ? requireModule(path.join(this.path, pluginConfig.packageName))
+        : requireModule(pluginConfig.packageName);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      throw new Error(
+        `Cannot load module for plugin ${pluginConfig.packageName}: ${message}`
+      );
+    }
   }
 }
 

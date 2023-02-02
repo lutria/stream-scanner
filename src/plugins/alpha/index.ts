@@ -1,8 +1,12 @@
-import { SourcePlugin } from "../SourcePlugin";
+import { IScanParams, SourcePlugin } from "../SourcePlugin";
 
 class AlphaSourcePlugin extends SourcePlugin {
-  scan() {
-    console.log("suck it");
+  getSourceName() {
+    return "dev.lutria.source-c83fe81";
+  }
+
+  scanStream(params: IScanParams) {
+    console.log(`Scanning stream with externalId: ${params.externalId}`);
   }
 }
 
